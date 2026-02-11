@@ -5,6 +5,7 @@ import { decodeBinary } from "./lib/src/string_and_binary/convert.ts";
 import { isPlainText } from "./lib/src/string_and_binary/path.ts";
 import { DispatchFun, Peer } from "./Peer.ts";
 import { createBinaryBlob, createTextBlob, isDocContentSame, unique } from "./lib/src/common/utils.ts";
+import { PouchDB } from "./lib/src/pouchdb/pouchdb-http.ts";
 
 // export class PeerInstance()
 
@@ -14,6 +15,13 @@ export class PeerCouchDB extends Peer {
     constructor(conf: PeerCouchDBConf, dispatcher: DispatchFun) {
         super(conf, dispatcher);
         this.man = new DirectFileManipulator(conf);
+        // Use Deno's native fetch to bypass node:http shim issues with Traefik/long-polling
+        this.man.$$createPouchDBInstance = <T extends object>(): PouchDB.Database<T> => {
+            return new PouchDB(this.man.options.url + "/" + this.man.options.database, {
+                auth: { username: this.man.options.username, password: this.man.options.password },
+                fetch: (url: string | Request, opts?: RequestInit) => globalThis.fetch(url, opts),
+            }) as PouchDB.Database<T>;
+        };
         // Fetch remote since.
         this.man.since = this.getSetting("since") || "now";
     }
