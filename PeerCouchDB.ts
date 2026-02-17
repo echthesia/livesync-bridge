@@ -26,6 +26,7 @@ export class PeerCouchDB extends Peer {
         this.man.since = this.getSetting("since") || "now";
     }
     async delete(pathSrc: string): Promise<boolean> {
+        await this.man.ready.promise;
         const path = this.toLocalPath(pathSrc);
         if (await this.isRepeating(pathSrc, false)) {
             return false;
@@ -39,6 +40,7 @@ export class PeerCouchDB extends Peer {
         return r;
     }
     async put(pathSrc: string, data: FileData): Promise<boolean> {
+        await this.man.ready.promise;
         const path = this.toLocalPath(pathSrc);
         if (await this.isRepeating(pathSrc, data)) {
             return false;
@@ -71,6 +73,7 @@ export class PeerCouchDB extends Peer {
         return r;
     }
     async get(pathSrc: FilePathWithPrefix): Promise<false | FileData> {
+        await this.man.ready.promise;
         const path = this.toLocalPath(pathSrc) as FilePathWithPrefix;
         const ret = await this.man.get(path) as false | ReadyEntry;
         if (ret === false) {
@@ -85,6 +88,7 @@ export class PeerCouchDB extends Peer {
         };
     }
     async getMeta(pathSrc: FilePathWithPrefix): Promise<false | FileData> {
+        await this.man.ready.promise;
         const path = this.toLocalPath(pathSrc) as FilePathWithPrefix;
         const ret = await this.man.get(path, true) as false | MetaEntry;
         if (ret === false) {
