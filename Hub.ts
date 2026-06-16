@@ -27,7 +27,12 @@ export class Hub {
             }
         }
         for (const p of this.peers) {
-            p.start();
+            // Fire-and-forget by design (peers start concurrently), but never let a
+            // peer's start() reject unhandled — that is fatal in Deno. PeerCouchDB
+            // now supervises its own connect loop; this is belt-and-suspenders.
+            p.start().catch((e) => {
+                console.error(`[Hub] peer "${p.config.name}" start() failed:`, e);
+            });
         }
     }
 
