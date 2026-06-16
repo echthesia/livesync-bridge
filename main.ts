@@ -3,6 +3,7 @@ import { LOG_LEVEL_DEBUG } from "./lib/src/common/logger.ts";
 import { Hub } from "./Hub.ts";
 import { Config } from "./types.ts";
 import { parseArgs } from "jsr:@std/cli";
+import { dirname } from "@std/path";
 
 // Last-resort safety net for a long-running sync daemon. A transient backend
 // hiccup — e.g. CouchDB returning a non-JSON body while still warming up at
@@ -49,6 +50,9 @@ hub.start();
 const healthFile = Deno.env.get(`${KEY}HEALTH_FILE`) ?? "/tmp/lsb-health.json";
 if (healthFile) {
     const tmpFile = `${healthFile}.tmp`;
+    // Make sure the directory exists, so a custom LSB_HEALTH_FILE in a not-yet-
+    // created dir doesn't make every beat fail (→ stale file → false unhealthy).
+    await Deno.mkdir(dirname(healthFile), { recursive: true }).catch(() => {});
     const beat = async () => {
         try {
             const h = await hub.healthProbe();

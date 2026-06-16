@@ -29,6 +29,12 @@ export class PeerCouchDB extends Peer {
     // failed connect requires a *fresh* manipulator, not re-awaiting the old,
     // permanently-pending one.
     private _buildManipulator(): void {
+        // Release the previous instance if we're rebuilding. Each retry that gets
+        // past the probe but fails to connect (CouchDB reachable but e.g. a config
+        // error) rebuilds; without this the old manipulator's local DB handle would
+        // leak. Best-effort and fire-and-forget — it may be mid-init, and we don't
+        // want to block the connect path (or fail it) on teardown.
+        const prev = this.man as DirectFileManipulator | undefined;
         this.man = new DirectFileManipulator(this.config);
         // Use Deno's native fetch to bypass node:http shim issues with Traefik/long-polling
         this.man.$$createPouchDBInstance = <T extends object>(): PouchDB.Database<T> => {
@@ -39,6 +45,7 @@ export class PeerCouchDB extends Peer {
         };
         // Fetch remote since.
         this.man.since = this.getSetting("since") || "now";
+        if (prev) void prev.close().catch(() => {});
     }
     async delete(pathSrc: string): Promise<boolean> {
         await this._started.promise;
