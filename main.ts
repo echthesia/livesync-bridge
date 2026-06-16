@@ -48,9 +48,13 @@ hub.start();
 // The probe checks freshness AND `ok`. Set LSB_HEALTH_FILE="" to disable.
 const healthFile = Deno.env.get(`${KEY}HEALTH_FILE`) ?? "/tmp/lsb-health.json";
 if (healthFile) {
+    const tmpFile = `${healthFile}.tmp`;
     const beat = async () => {
         try {
-            await Deno.writeTextFile(healthFile, JSON.stringify({ ts: Date.now(), ...hub.health() }));
+            // Write-then-rename so the probe never reads a half-written file (a torn
+            // read would parse-fail and report a false "unhealthy").
+            await Deno.writeTextFile(tmpFile, JSON.stringify({ ts: Date.now(), ...hub.health() }));
+            await Deno.rename(tmpFile, healthFile);
         } catch (e) {
             console.error("[LSB] failed to write health heartbeat:", e);
         }

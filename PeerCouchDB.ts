@@ -17,7 +17,10 @@ export class PeerCouchDB extends Peer {
     private _connected = false;
     constructor(conf: PeerCouchDBConf, dispatcher: DispatchFun) {
         super(conf, dispatcher);
-        this._buildManipulator();
+        // The manipulator is built lazily in start(), only after a probe confirms
+        // CouchDB is reachable. Building it here would fire its one-shot init
+        // against a possibly-down CouchDB (an unhandled rejection) and then be
+        // discarded and rebuilt on the first successful connect.
     }
     // (Re)create the underlying DirectFileManipulator. Its constructor kicks off a
     // one-shot async DB init whose `ready` promise never resolves (and whose
@@ -118,11 +121,17 @@ export class PeerCouchDB extends Peer {
     // exactly the case that used to crash the bridge — so we treat it as "not
     // ready yet" and let the caller retry, fast, instead of waiting on a hung init.
     private async _probeCouch(): Promise<void> {
-        const url = `${this.man.options.url}/${this.man.options.database}`;
+        // Read straight from config (the manipulator may not be built yet, and these
+        // are the same credentials it will use).
+        const url = `${this.config.url}/${this.config.database}`;
         const headers: Record<string, string> = {};
-        const user = this.man.options.username;
-        if (user) {
-            headers["Authorization"] = `Basic ${btoa(`${user}:${this.man.options.password ?? ""}`)}`;
+        if (this.config.username) {
+            // UTF-8-safe Basic auth: btoa() throws on code points > 0xFF, so a
+            // non-ASCII password would otherwise make every probe fail forever even
+            // though CouchDB would accept it.
+            const creds = `${this.config.username}:${this.config.password ?? ""}`;
+            const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(creds)));
+            headers["Authorization"] = `Basic ${b64}`;
         }
         const res = await globalThis.fetch(url, { headers });
         if (!res.ok) {
@@ -272,7 +281,8 @@ export class PeerCouchDB extends Peer {
         }
     }
     async stop(): Promise<void> {
-        this.man.endWatch();
+        // `man` may not exist yet if stop() races a still-connecting start().
+        this.man?.endWatch();
         return await Promise.resolve();
     }
     // ok once the initial connect+watch (or empty-remote) succeeded. The exit code
