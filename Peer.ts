@@ -14,6 +14,11 @@ export interface PeerHealth {
     type: string;
     ok: boolean;
     detail?: string;
+    // Whether this peer's backend is reachable right now. Used to tell "not
+    // syncing because the backend is down" (wait, don't restart) apart from "not
+    // syncing while the backend is up" (the bridge is at fault, restart can help).
+    // Peers with no remote backend (e.g. storage) report true.
+    backendUp: boolean;
 }
 
 export abstract class Peer {
@@ -24,10 +29,17 @@ export abstract class Peer {
         this.config = conf;
         this.dispatchToHub = dispatcher;
     }
-    // Liveness/health for the /health endpoint. Default: healthy once constructed;
-    // peers that can lose their backend connection override this.
+    // Quick, non-blocking health snapshot. Default: healthy once constructed, with
+    // no remote backend; peers that can lose a backend connection override this.
     health(): PeerHealth {
-        return { name: this.config.name, type: this.config.type, ok: true };
+        return { name: this.config.name, type: this.config.type, ok: true, backendUp: true };
+    }
+    // Health including a (possibly I/O-bound) backend-reachability check. Default
+    // defers to the synchronous snapshot; PeerCouchDB overrides it to probe CouchDB
+    // when it isn't syncing, so the heartbeat can distinguish "backend down" from
+    // "bridge at fault".
+    probeHealth(): Promise<PeerHealth> {
+        return Promise.resolve(this.health());
     }
     toLocalPath(path: string) {
         const relativeJoined = joinPosix(this.config.baseDir, path);

@@ -10,11 +10,16 @@ export class Hub {
     constructor(conf: Config) {
         this.conf = conf;
     }
-    // Aggregate peer health for the /health endpoint. Unhealthy if any peer is
-    // not ok, or if no peers were constructed (misconfiguration).
-    health(): { ok: boolean; peers: PeerHealth[] } {
-        const peers = this.peers.map((p) => p.health());
-        return { ok: peers.length > 0 && peers.every((p) => p.ok), peers };
+    // Aggregate peer health for the heartbeat. `ok` = every peer syncing (also
+    // false if no peers were constructed). `restartWorthy` = a peer is failing
+    // while its backend is reachable — i.e. the bridge is at fault and a restart
+    // could help; a peer that's down only because its backend is down is NOT
+    // restart-worthy (restarting wouldn't help, and we'd just churn).
+    async healthProbe(): Promise<{ ok: boolean; restartWorthy: boolean; peers: PeerHealth[] }> {
+        const peers = await Promise.all(this.peers.map((p) => p.probeHealth()));
+        const ok = peers.length > 0 && peers.every((p) => p.ok);
+        const restartWorthy = peers.some((p) => !p.ok && p.backendUp);
+        return { ok, restartWorthy, peers };
     }
     start() {
         for (const p of this.peers) {

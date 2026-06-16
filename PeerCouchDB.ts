@@ -15,6 +15,7 @@ export class PeerCouchDB extends Peer {
     declare config: PeerCouchDBConf;
     private _started = promiseWithResolver<void>();
     private _connected = false;
+    private _remoteEmpty = false;
     constructor(conf: PeerCouchDBConf, dispatcher: DispatchFun) {
         super(conf, dispatcher);
         // The manipulator is built lazily in start(), only after a probe confirms
@@ -120,7 +121,7 @@ export class PeerCouchDB extends Peer {
     // JSON. A half-ready CouchDB (or a proxy error page) returns a non-JSON body —
     // exactly the case that used to crash the bridge — so we treat it as "not
     // ready yet" and let the caller retry, fast, instead of waiting on a hung init.
-    private async _probeCouch(): Promise<void> {
+    private async _probeCouch(timeoutMs = 10000): Promise<void> {
         // Read straight from config (the manipulator may not be built yet, and these
         // are the same credentials it will use).
         const url = `${this.config.url}/${this.config.database}`;
@@ -133,12 +134,26 @@ export class PeerCouchDB extends Peer {
             const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(creds)));
             headers["Authorization"] = `Basic ${b64}`;
         }
-        const res = await globalThis.fetch(url, { headers });
+        // Bounded so a hung connection can't stall either the connect loop or the
+        // heartbeat's reachability check (which would look like a wedged process).
+        const res = await globalThis.fetch(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
         if (!res.ok) {
             await res.body?.cancel();
             throw new Error(`CouchDB not ready: HTTP ${res.status}`);
         }
         await res.json();
+    }
+
+    // Is CouchDB up and serving right now? Uses the same success threshold as the
+    // connect probe (200 + parseable JSON), so a still-warming-up CouchDB (refused,
+    // or 503) reads as down — we don't want a restart while it boots.
+    private async _couchReachable(): Promise<boolean> {
+        try {
+            await this._probeCouch(5000);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     // Wait for the manipulator's one-shot init, but bounded: its `ready` promise
@@ -235,6 +250,9 @@ export class PeerCouchDB extends Peer {
             if (!w) {
                 this.normalLog(`Remote database looks like empty. fetch from the first.`);
                 this.setSetting("remote-created", "0");
+                // Connected fine; there's just nothing to watch yet. Mark it so health
+                // counts this as syncing rather than a stuck "not watching" state.
+                this._remoteEmpty = true;
                 return;
             }
             const created = w.created;
@@ -285,17 +303,27 @@ export class PeerCouchDB extends Peer {
         this.man?.endWatch();
         return await Promise.resolve();
     }
-    // ok once the initial connect+watch (or empty-remote) succeeded. The exit code
-    // deliberately does NOT depend on `watching` (which dips briefly during the
-    // self-healing 10s reconnect, and is false for an empty remote DB) to avoid
-    // flapping; that live state is surfaced in `detail` for observability.
+    // Synchronous snapshot. `ok` means actually syncing — connected AND either
+    // watching or a known-empty remote. A brief `watching` dip during the 10s
+    // self-healing reconnect makes ok=false, but the Quadlet healthcheck's retry
+    // window (3 × 30s) absorbs that, so it doesn't cause a restart. backendUp is
+    // only asserted here when we're syncing; probeHealth() refines it otherwise.
     override health(): PeerHealth {
         const watching = this.man?.watching === true;
+        const syncing = this._connected && (watching || this._remoteEmpty);
         return {
             name: this.config.name,
             type: "couchdb",
-            ok: this._connected,
-            detail: this._connected ? (watching ? "watching" : "connected (idle)") : "connecting",
+            ok: syncing,
+            detail: !this._connected ? "connecting" : (watching ? "watching" : (this._remoteEmpty ? "connected (empty remote)" : "reconnecting")),
+            backendUp: syncing,
         };
+    }
+    // When not syncing, probe CouchDB so the heartbeat can tell "backend down"
+    // (wait) from "backend up but not syncing" (the bridge is at fault → restart).
+    override async probeHealth(): Promise<PeerHealth> {
+        const base = this.health();
+        if (base.ok) return base;
+        return { ...base, backendUp: await this._couchReachable() };
     }
 }

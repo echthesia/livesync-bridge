@@ -51,9 +51,12 @@ if (healthFile) {
     const tmpFile = `${healthFile}.tmp`;
     const beat = async () => {
         try {
+            const h = await hub.healthProbe();
             // Write-then-rename so the probe never reads a half-written file (a torn
-            // read would parse-fail and report a false "unhealthy").
-            await Deno.writeTextFile(tmpFile, JSON.stringify({ ts: Date.now(), ...hub.health() }));
+            // read would parse-fail and report a false "unhealthy"). ts is stamped
+            // after the (possibly I/O-bound) health probe, so it still reflects a
+            // live event loop.
+            await Deno.writeTextFile(tmpFile, JSON.stringify({ ts: Date.now(), ...h }));
             await Deno.rename(tmpFile, healthFile);
         } catch (e) {
             console.error("[LSB] failed to write health heartbeat:", e);
