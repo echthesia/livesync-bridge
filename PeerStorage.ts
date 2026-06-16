@@ -330,8 +330,9 @@ export class PeerStorage extends Peer {
     }
     override health(): PeerHealth {
         const ok = !!(this.watcherDeno || this.watcher);
-        // No remote backend: a dead local watcher has no "backend down" excuse, so
-        // backendUp stays true and a not-ok storage peer is treated as restart-worthy.
-        return { name: this.config.name, type: "storage", ok, detail: ok ? "watching" : "starting", backendUp: true };
+        // No remote backend (backendUp always true). A storage peer still doing its
+        // initial offline scan is "starting", not yet healthy, so the base restart
+        // logic won't flag it — only a watcher that dies after being healthy counts.
+        return { name: this.config.name, type: "storage", ok, detail: ok ? "watching" : "starting", backendUp: true, restartWorthy: false };
     }
 }

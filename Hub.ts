@@ -11,14 +11,13 @@ export class Hub {
         this.conf = conf;
     }
     // Aggregate peer health for the heartbeat. `ok` = every peer syncing (also
-    // false if no peers were constructed). `restartWorthy` = a peer is failing
-    // while its backend is reachable — i.e. the bridge is at fault and a restart
-    // could help; a peer that's down only because its backend is down is NOT
-    // restart-worthy (restarting wouldn't help, and we'd just churn).
+    // false if no peers were constructed). `restartWorthy` = any peer judges itself
+    // restart-worthy (was healthy, now persistently failing while its backend is
+    // up) — see Peer.probeHealth.
     async healthProbe(): Promise<{ ok: boolean; restartWorthy: boolean; peers: PeerHealth[] }> {
         const peers = await Promise.all(this.peers.map((p) => p.probeHealth()));
         const ok = peers.length > 0 && peers.every((p) => p.ok);
-        const restartWorthy = peers.some((p) => !p.ok && p.backendUp);
+        const restartWorthy = peers.some((p) => p.restartWorthy);
         return { ok, restartWorthy, peers };
     }
     start() {

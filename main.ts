@@ -45,7 +45,7 @@ hub.start();
 // container, so there's no need to expose a socket — we just write the health
 // state to a file on a timer. The recorded `ts` doubles as a liveness signal:
 // a wedged event loop stops updating it, so a stale file reads as unhealthy.
-// The probe checks freshness AND `ok`. Set LSB_HEALTH_FILE="" to disable.
+// The probe checks freshness AND `restartWorthy`. Set LSB_HEALTH_FILE="" to disable.
 const healthFile = Deno.env.get(`${KEY}HEALTH_FILE`) ?? "/tmp/lsb-health.json";
 if (healthFile) {
     const tmpFile = `${healthFile}.tmp`;
@@ -62,6 +62,11 @@ if (healthFile) {
             console.error("[LSB] failed to write health heartbeat:", e);
         }
     };
-    await beat();
-    setInterval(beat, 10000);
+    // Self-scheduling (not setInterval) so a slow probe can never overlap the next
+    // beat — overlapping beats would race on the shared temp file.
+    const scheduleBeat = async () => {
+        await beat();
+        setTimeout(scheduleBeat, 10000);
+    };
+    scheduleBeat();
 }

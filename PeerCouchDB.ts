@@ -317,13 +317,13 @@ export class PeerCouchDB extends Peer {
             ok: syncing,
             detail: !this._connected ? "connecting" : (watching ? "watching" : (this._remoteEmpty ? "connected (empty remote)" : "reconnecting")),
             backendUp: syncing,
+            restartWorthy: false,
         };
     }
-    // When not syncing, probe CouchDB so the heartbeat can tell "backend down"
-    // (wait) from "backend up but not syncing" (the bridge is at fault → restart).
-    override async probeHealth(): Promise<PeerHealth> {
-        const base = this.health();
-        if (base.ok) return base;
-        return { ...base, backendUp: await this._couchReachable() };
+    // Backend reachability for the base restart logic — probe CouchDB (bounded). The
+    // base only calls this once a peer has been healthy and is now failing, so a
+    // CouchDB outage (probe fails → backendUp false) keeps the peer non-restart-worthy.
+    override checkBackendUp(): Promise<boolean> {
+        return this._couchReachable();
     }
 }
