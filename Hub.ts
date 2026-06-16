@@ -1,5 +1,5 @@
 import { Config, FileData } from "./types.ts";
-import { Peer } from "./Peer.ts";
+import { Peer, PeerHealth } from "./Peer.ts";
 import { PeerStorage } from "./PeerStorage.ts";
 import { PeerCouchDB } from "./PeerCouchDB.ts";
 
@@ -9,6 +9,12 @@ export class Hub {
     peers = [] as Peer[];
     constructor(conf: Config) {
         this.conf = conf;
+    }
+    // Aggregate peer health for the /health endpoint. Unhealthy if any peer is
+    // not ok, or if no peers were constructed (misconfiguration).
+    health(): { ok: boolean; peers: PeerHealth[] } {
+        const peers = this.peers.map((p) => p.health());
+        return { ok: peers.length > 0 && peers.every((p) => p.ok), peers };
     }
     start() {
         for (const p of this.peers) {

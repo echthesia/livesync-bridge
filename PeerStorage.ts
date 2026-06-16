@@ -6,7 +6,7 @@ import { isPlainText } from "./lib/src/string_and_binary/path.ts";
 import { parse, format, relative, dirname, resolve } from "@std/path";
 import { format as posixFormat, parse as posixParse } from "@std/path/posix"
 import { scheduleOnceIfDuplicated } from "octagonal-wheels/concurrency/lock";
-import { DispatchFun, Peer } from "./Peer.ts";
+import { DispatchFun, Peer, PeerHealth } from "./Peer.ts";
 import chokidar from "chokidar";
 import { walk } from 'fs/walk';
 
@@ -327,5 +327,9 @@ export class PeerStorage extends Peer {
         this.watcherDeno?.close();
         this.watcherDeno = undefined;
         return await Promise.resolve();
+    }
+    override health(): PeerHealth {
+        const ok = !!(this.watcherDeno || this.watcher);
+        return { name: this.config.name, type: "storage", ok, detail: ok ? "watching" : "starting" };
     }
 }

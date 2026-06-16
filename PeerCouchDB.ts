@@ -3,7 +3,7 @@ import { FilePathWithPrefix, LOG_LEVEL_NOTICE, MILESTONE_DOCID, TweakValues } fr
 import { PeerCouchDBConf, FileData } from "./types.ts";
 import { decodeBinary } from "./lib/src/string_and_binary/convert.ts";
 import { isPlainText } from "./lib/src/string_and_binary/path.ts";
-import { DispatchFun, Peer } from "./Peer.ts";
+import { DispatchFun, Peer, PeerHealth } from "./Peer.ts";
 import { createBinaryBlob, createTextBlob, isDocContentSame, unique } from "./lib/src/common/utils.ts";
 import { PouchDB } from "./lib/src/pouchdb/pouchdb-http.ts";
 import { promiseWithResolver } from "octagonal-wheels/promises";
@@ -14,6 +14,7 @@ export class PeerCouchDB extends Peer {
     man!: DirectFileManipulator;
     declare config: PeerCouchDBConf;
     private _started = promiseWithResolver<void>();
+    private _connected = false;
     constructor(conf: PeerCouchDBConf, dispatcher: DispatchFun) {
         super(conf, dispatcher);
         this._buildManipulator();
@@ -161,6 +162,7 @@ export class PeerCouchDB extends Peer {
                 if (attempt > 0) {
                     this.normalLog(`Connected to CouchDB after ${attempt} retr${attempt === 1 ? "y" : "ies"}.`, LOG_LEVEL_NOTICE);
                 }
+                this._connected = true;
                 this._started.resolve();
                 return;
             } catch (e) {
@@ -272,5 +274,18 @@ export class PeerCouchDB extends Peer {
     async stop(): Promise<void> {
         this.man.endWatch();
         return await Promise.resolve();
+    }
+    // ok once the initial connect+watch (or empty-remote) succeeded. The exit code
+    // deliberately does NOT depend on `watching` (which dips briefly during the
+    // self-healing 10s reconnect, and is false for an empty remote DB) to avoid
+    // flapping; that live state is surfaced in `detail` for observability.
+    override health(): PeerHealth {
+        const watching = this.man?.watching === true;
+        return {
+            name: this.config.name,
+            type: "couchdb",
+            ok: this._connected,
+            detail: this._connected ? (watching ? "watching" : "connected (idle)") : "connecting",
+        };
     }
 }

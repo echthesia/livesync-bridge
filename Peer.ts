@@ -9,6 +9,13 @@ import { computeHash } from "./util.ts";
 
 export type DispatchFun = (source: Peer, path: string, data: FileData | false) => Promise<void>;
 
+export interface PeerHealth {
+    name: string;
+    type: string;
+    ok: boolean;
+    detail?: string;
+}
+
 export abstract class Peer {
     config: PeerConf;
     // hub: Hub;
@@ -16,6 +23,11 @@ export abstract class Peer {
     constructor(conf: PeerConf, dispatcher: DispatchFun) {
         this.config = conf;
         this.dispatchToHub = dispatcher;
+    }
+    // Liveness/health for the /health endpoint. Default: healthy once constructed;
+    // peers that can lose their backend connection override this.
+    health(): PeerHealth {
+        return { name: this.config.name, type: this.config.type, ok: true };
     }
     toLocalPath(path: string) {
         const relativeJoined = joinPosix(this.config.baseDir, path);

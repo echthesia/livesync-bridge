@@ -40,3 +40,21 @@ try {
 console.log("LiveSync Bridge is now started!");
 const hub = new Hub(config);
 hub.start();
+
+// Health heartbeat for the container HealthCmd. The check runs inside the
+// container, so there's no need to expose a socket — we just write the health
+// state to a file on a timer. The recorded `ts` doubles as a liveness signal:
+// a wedged event loop stops updating it, so a stale file reads as unhealthy.
+// The probe checks freshness AND `ok`. Set LSB_HEALTH_FILE="" to disable.
+const healthFile = Deno.env.get(`${KEY}HEALTH_FILE`) ?? "/tmp/lsb-health.json";
+if (healthFile) {
+    const beat = async () => {
+        try {
+            await Deno.writeTextFile(healthFile, JSON.stringify({ ts: Date.now(), ...hub.health() }));
+        } catch (e) {
+            console.error("[LSB] failed to write health heartbeat:", e);
+        }
+    };
+    await beat();
+    setInterval(beat, 10000);
+}
